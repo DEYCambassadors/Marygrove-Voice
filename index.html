@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Marygro Voice</title>
+<title>Marygrove Voice</title>
+<!-- Firebase App (Compat) & Realtime Database SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <meta name="description" content="Marygrove Voice — share ideas, concerns, and positive feedback.">
 <meta name="theme-color" content="#2563eb">
 <style>
@@ -316,7 +319,10 @@ main{padding-top:88px!important}
 
 <header>
   <div class="bar">
-    <button class="brand" id="brandHome" type="button" aria-label="Marygrove Voice — refresh page">Marygrove Voice</button>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="brand" id="brandHome" type="button" aria-label="Marygrove Voice — refresh page">Marygrove Voice</button>
+      <span id="syncBadge" style="font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:12px;background:rgba(21,128,61,0.12);color:#15803d"><span id="syncDot" style="width:7px;height:7px;border-radius:50%;background:#16a34a;display:inline-block"></span><span id="syncText">Live Cloud Sync</span></span>
+    </div>
     <div id="nav" class="hidden" style="display:flex;align-items:center;gap:8px">
       <div class="tabs">
         <button class="tab on" id="tabHome">Home</button>
@@ -915,7 +921,8 @@ $('feed').addEventListener('click', e => {
     store.agreeLog = store.agreeLog || [];
     store.agreeLog.push({ postId: p.id, user: store.user.id, time: Date.now() });
   }
-  save(); renderFeed();
+  save(); renderFeed(); renderHome();
+  if (typeof syncAgrees === 'function') syncAgrees(p.id, p.agrees);
 });
 
 // ---- Operator ----
@@ -1013,14 +1020,14 @@ function addPrompt() {
   const t = $('newPrompt').value.trim();
   if (t.length < 5) return toast('Prompts need at least 5 characters.');
   store.prompts.push({ id: uid(), text: t });
-  save(); toast('Prompt added'); refreshPrompts();
+  save(); if (typeof syncPrompts === 'function') syncPrompts(); toast('Prompt added'); refreshPrompts();
 }
 $('promptMgr').addEventListener('click', e => {
   if (e.target.id === 'addPrompt') addPrompt();
   const id = e.target.dataset.rmprompt;
   if (id) {
     store.prompts = store.prompts.filter(p => p.id !== id);
-    save(); toast('Prompt removed. Its posts stay in the feed.'); refreshPrompts();
+    save(); if (typeof syncPrompts === 'function') syncPrompts(); toast('Prompt removed. Its posts stay in the feed.'); refreshPrompts();
   }
 });
 $('promptMgr').addEventListener('keydown', e => { if (e.target.id === 'newPrompt' && e.key === 'Enter') addPrompt(); });
@@ -1063,10 +1070,10 @@ $('opList').addEventListener('change', e => {
   const priorityId = e.target.dataset.priority;
   if (statusId) {
     const post = store.posts.find(x => x.id === statusId); if (!post) return;
-    post.status = e.target.value; save(); toast('Status updated'); renderDash(); renderStats(); renderResponses();
+    post.status = e.target.value; save(); if (typeof syncField === 'function') syncField(post.id, 'status', post.status); toast('Status updated'); renderDash(); renderStats(); renderResponses();
   } else if (priorityId) {
     const post = store.posts.find(x => x.id === priorityId); if (!post) return;
-    post.priority = e.target.value; save(); toast('Ambassador priority saved'); renderResponses(); renderDash();
+    post.priority = e.target.value; save(); if (typeof syncField === 'function') syncField(post.id, 'priority', post.priority); toast('Ambassador priority saved'); renderResponses(); renderDash();
   }
 });
 // Two-tap delete: first tap arms, second tap confirms
@@ -1079,6 +1086,7 @@ $('opList').addEventListener('click', e => {
     setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Delete'; } }, 3000);
     return;
   }
+  if (typeof removeRemotePost === 'function') removeRemotePost(b.dataset.del);
   store.posts = store.posts.filter(p => p.id !== b.dataset.del);
   save(); toast('Response deleted');
   renderResponses(); renderDash(); renderStats();
@@ -1413,13 +1421,13 @@ if ($('whyCard')) {
     if (!b) return;
     if (b.id === 'whySave') {
       const v = ($('whyText').value || '').trim().slice(0, WHY_MAX);
-      store.homeWhy = v; save(); renderHomeWhy(); renderWhyMgr();
+      store.homeWhy = v; save(); if (typeof syncHomeWhy === 'function') syncHomeWhy(); renderHomeWhy(); renderWhyMgr();
       toast(v ? 'Home message saved' : 'Home message reset to default');
     } else if (b.id === 'whyToggle') {
-      store.homeWhyHidden = !store.homeWhyHidden; save(); renderHomeWhy(); renderWhyMgr();
+      store.homeWhyHidden = !store.homeWhyHidden; save(); if (typeof syncHomeWhy === 'function') syncHomeWhy(); renderHomeWhy(); renderWhyMgr();
       toast(store.homeWhyHidden ? 'Home message hidden' : 'Home message shown');
     } else if (b.id === 'whyClear') {
-      store.homeWhy = ''; save(); renderHomeWhy(); renderWhyMgr();
+      store.homeWhy = ''; save(); if (typeof syncHomeWhy === 'function') syncHomeWhy(); renderHomeWhy(); renderWhyMgr();
       toast('Home message reset to default');
     }
   });
@@ -1600,13 +1608,14 @@ $('feed').addEventListener('click', e => {
   if (p.reports.includes(store.user.id)) return toast('You already reported this post.');
   p.reports.push(store.user.id);
   save(); renderFeed();
+  if (typeof syncField === 'function') syncField(p.id, 'reports', p.reports);
   toast('Thanks. The operator will review this post.');
 });
 $('opList').addEventListener('click', e => {
   const b = e.target.closest('[data-clearreports]');
   if (!b) return;
   const p = store.posts.find(x => x.id === b.dataset.clearreports);
-  if (p) { p.reports = []; save(); toast('Reports cleared'); renderResponses(); }
+  if (p) { p.reports = []; save(); if (typeof syncField === 'function') syncField(p.id, 'reports', []); toast('Reports cleared'); renderResponses(); }
 });
 
 // ---- Meeting brief ----
@@ -1781,10 +1790,10 @@ window.addEventListener('pageshow', () => {
   };
   $('opList').addEventListener('click',e=>{
     const noteButton=e.target.closest('[data-save-note]');
-    if(noteButton){const p=store.posts.find(x=>x.id===noteButton.dataset.saveNote), field=$('opList').querySelector(`[data-note-field=\"${noteButton.dataset.saveNote}\"]`);if(!p||!field)return;p.operatorNote=field.value.trim();save();toast('Private note saved');return;}
+    if(noteButton){const p=store.posts.find(x=>x.id===noteButton.dataset.saveNote), field=$('opList').querySelector(`[data-note-field=\"${noteButton.dataset.saveNote}\"]`);if(!p||!field)return;p.operatorNote=field.value.trim();save();if(typeof syncField==='function')syncField(p.id,'operatorNote',p.operatorNote);toast('Private note saved');return;}
     const b=e.target.closest('[data-archive]');if(!b)return;
     const p=store.posts.find(x=>x.id===b.dataset.archive);if(!p)return;
-    p.archived=!p.archived;save();renderResponses();renderFeed();renderDash();toast(p.archived?'Feedback archived':'Feedback restored');
+    p.archived=!p.archived;save();if(typeof syncField==='function')syncField(p.id,'archived',p.archived);renderResponses();renderFeed();renderDash();toast(p.archived?'Feedback archived':'Feedback restored');
   });
   // Submission quality checks: near-duplicate warning before committing, with a clear confirm step.
   const postBtn=$('post'); if(postBtn){
@@ -1821,6 +1830,7 @@ $('opList').addEventListener('click', e => {
   const p = store.posts.find(x => x.id === b.dataset.flag);
   if (!p) return;
   p.flagged = !p.flagged; save();
+  if (typeof syncField === 'function') syncField(p.id, 'flagged', p.flagged);
   toast(p.flagged ? 'Flagged for review' : 'Flag removed');
   renderResponses();
 });
@@ -1851,77 +1861,214 @@ $('briefPrint').onclick = () => {
 $('composeSolution').addEventListener('input', () => {
   $('solCount').textContent = `${$('composeSolution').value.length} / 300`;
 });
-// ---- Shared database (Supabase): posts are sent to and read from the posts table ----
-const SUPABASE_URL = 'https://hwyvwxcpvoprvuwgsyre.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_H9ZN7QxEo2G6uopdiQPbww_hNXRoslM';
-function dbHeaders(extra) {
-  return Object.assign({ apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json' }, extra || {});
+// ---- Shared Database: Firebase Realtime Database Engine ----
+const firebaseConfig = {
+  apiKey: "AIzaSyC6ws5Q0yWiZyLJPqsdfn5cLB4jYxEwJQ",
+  authDomain: "marygrove-b3103.firebaseapp.com",
+  databaseURL: "https://marygrove-b3103-default-rtdb.firebaseio.com",
+  projectId: "marygrove-b3103",
+  storageBucket: "marygrove-b3103.firebasestorage.app",
+  messagingSenderId: "582074770772",
+  appId: "1:582074770772:web:41a8a53559946178e514c1"
+};
+
+let rtdb = null;
+try {
+  if (typeof firebase !== 'undefined') {
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    rtdb = firebase.database();
+  }
+} catch (e) {
+  console.error('Firebase initialization error:', e);
 }
-// Only the post content goes to the database. Agrees, reports, notes and device IDs stay on this device.
-function toRow(p) {
+
+function sanitizePost(p) {
   return {
-    id: p.id, house: p.house, tag: p.tag, text: p.text,
-    title: p.title || null, solution: p.solution || null,
-    status: p.status || 'New', priority: p.priority || '', flagged: !!p.flagged,
-    created_at: new Date(p.time).toISOString()
+    id: String(p.id),
+    by: String(p.by || ''),
+    house: String(p.house || 'Other'),
+    tag: String(p.tag || 'Other'),
+    text: String(p.text || ''),
+    title: String(p.title || ''),
+    solution: String(p.solution || ''),
+    status: String(p.status || 'New'),
+    priority: String(p.priority || ''),
+    flagged: !!p.flagged,
+    archived: !!p.archived,
+    time: Number(p.time) || Date.now(),
+    agrees: Array.isArray(p.agrees) ? p.agrees : (p.agrees && typeof p.agrees === 'object' ? Object.values(p.agrees) : []),
+    reports: Array.isArray(p.reports) ? p.reports : (p.reports && typeof p.reports === 'object' ? Object.values(p.reports) : []),
+    promptId: String(p.promptId || ''),
+    operatorNote: String(p.operatorNote || '')
   };
 }
-function fromRow(r, local) {
-  const old = local || {};
+
+function normalizePost(r) {
+  if (!r) return null;
   return {
-    id: r.id, by: old.by, house: r.house, tag: r.tag, text: r.text,
-    title: r.title || '', solution: r.solution || '',
-    status: r.status || 'New', priority: r.priority || '', flagged: !!r.flagged,
-    time: new Date(r.created_at).getTime(),
-    agrees: old.agrees || [], reports: old.reports || [],
-    promptId: old.promptId || '', archived: !!old.archived, operatorNote: old.operatorNote || '',
+    id: String(r.id),
+    by: String(r.by || ''),
+    house: String(r.house || 'Other'),
+    tag: String(r.tag || 'Other'),
+    text: String(r.text || ''),
+    title: String(r.title || ''),
+    solution: String(r.solution || ''),
+    status: String(r.status || 'New'),
+    priority: String(r.priority || ''),
+    flagged: !!r.flagged,
+    archived: !!r.archived,
+    time: Number(r.time) || Date.now(),
+    agrees: Array.isArray(r.agrees) ? r.agrees : (r.agrees && typeof r.agrees === 'object' ? Object.values(r.agrees) : []),
+    reports: Array.isArray(r.reports) ? r.reports : (r.reports && typeof r.reports === 'object' ? Object.values(r.reports) : []),
+    promptId: String(r.promptId || ''),
+    operatorNote: String(r.operatorNote || ''),
     synced: true
   };
 }
-async function pushPost(p) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/posts`, {
-    method: 'POST', headers: dbHeaders({ Prefer: 'return=minimal' }), body: JSON.stringify(toRow(p))
-  });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
+
+function syncField(postId, field, val) {
+  if (rtdb && postId) {
+    rtdb.ref('posts/' + postId + '/' + field).set(val).catch(e => console.warn('Sync field error:', e));
+  }
 }
+
+function syncAgrees(postId, agreesList) {
+  if (rtdb && postId) {
+    rtdb.ref('posts/' + postId + '/agrees').set(agreesList || []).catch(e => console.warn('Sync agrees error:', e));
+  }
+}
+
+function removeRemotePost(postId) {
+  if (rtdb && postId) {
+    rtdb.ref('posts/' + postId).remove().catch(e => console.warn('Remove remote error:', e));
+  }
+}
+
+function syncPrompts() {
+  if (rtdb) {
+    rtdb.ref('prompts').set(store.prompts || []).catch(e => console.warn('Sync prompts error:', e));
+  }
+}
+
+function syncHomeWhy() {
+  if (rtdb) {
+    rtdb.ref('homeWhy').set(store.homeWhy || '').catch(e => console.warn('Sync homeWhy error:', e));
+    rtdb.ref('homeWhyHidden').set(!!store.homeWhyHidden).catch(e => console.warn('Sync homeWhyHidden error:', e));
+  }
+}
+
+async function pushPost(p) {
+  if (!rtdb) throw new Error('Firebase RTDB not initialized');
+  const clean = sanitizePost(p);
+  await rtdb.ref('posts/' + p.id).set(clean);
+}
+
 async function pushAndMark(p) {
   try {
     await pushPost(p);
-    p.synced = true; save();
-    toast('Thank you! Your feedback was submitted to the operator team.');
+    p.synced = true;
+    save();
+    toast('Thank you! Your feedback was shared with Marygrove Voice.');
   } catch (e) {
-    p.synced = false; save();
-    toast('Saved on this device. We could not reach the server, so it will sync when the connection returns.');
+    console.warn('Could not reach cloud database:', e);
+    p.synced = false;
+    save();
+    toast('Saved locally. Will sync to the cloud when connected.');
   }
   renderHome();
 }
-let syncing = false;
-async function syncFromDb() {
-  if (syncing) return;
-  syncing = true;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/posts?select=*&order=created_at.desc&limit=1000`, { headers: dbHeaders() });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const rows = await res.json();
-    const local = new Map(store.posts.map(p => [p.id, p]));
-    const remoteIds = new Set(rows.map(r => r.id));
-    const pending = store.posts.filter(p => !remoteIds.has(p.id) && p.synced === false);
-    store.posts = rows.map(r => fromRow(r, local.get(r.id))).concat(pending);
+
+// Live synchronization listeners
+function initFirebaseListeners() {
+  if (!rtdb) return;
+
+  // Real-time connection status
+  rtdb.ref('.info/connected').on('value', snap => {
+    const isOnline = snap.val() === true;
+    const badge = $('syncBadge');
+    const dot = $('syncDot');
+    const txt = $('syncText');
+    if (badge && dot && txt) {
+      if (isOnline) {
+        badge.style.background = 'rgba(21,128,61,0.12)';
+        badge.style.color = '#15803d';
+        dot.style.background = '#16a34a';
+        txt.textContent = 'Live Cloud Sync';
+      } else {
+        badge.style.background = 'rgba(220,38,38,0.12)';
+        badge.style.color = '#dc2626';
+        dot.style.background = '#dc2626';
+        txt.textContent = 'Connecting...';
+      }
+    }
+  });
+
+  // Real-time posts stream
+  rtdb.ref('posts').on('value', snapshot => {
+    const val = snapshot.val();
+    if (val) {
+      const remotePosts = Object.keys(val).map(key => {
+        const item = val[key];
+        item.id = item.id || key;
+        return normalizePost(item);
+      }).filter(Boolean);
+
+      const remoteIds = new Set(remotePosts.map(p => p.id));
+      const pending = (store.posts || []).filter(p => !remoteIds.has(p.id) && p.synced === false);
+      store.posts = remotePosts.concat(pending);
+    } else {
+      store.posts = (store.posts || []).filter(p => p.synced === false);
+    }
     save();
-    for (const p of pending) { try { await pushPost(p); p.synced = true; save(); } catch (e) {} }
-    if (store.user) { renderHome(); renderFeed(); }
-    if (currentView === 'opView') renderOp();
-  } catch (e) {
-    console.warn('Could not load shared posts:', e.message);
-  } finally {
-    syncing = false;
-  }
+    if (store.user) {
+      renderHome();
+      renderFeed();
+      renderRemaining();
+    }
+    if (currentView === 'opView') {
+      renderOp();
+      renderResponses();
+      renderDash();
+      renderStats();
+    }
+  }, err => {
+    console.warn('Realtime posts listener warning:', err.message);
+  });
+
+  // Real-time prompts stream
+  rtdb.ref('prompts').on('value', snapshot => {
+    const val = snapshot.val();
+    if (Array.isArray(val)) {
+      store.prompts = val;
+      save();
+      refreshPrompts();
+      renderCompose();
+    }
+  });
+
+  // Real-time home message stream
+  rtdb.ref('homeWhy').on('value', snapshot => {
+    const val = snapshot.val();
+    if (val !== null && val !== undefined) {
+      store.homeWhy = String(val);
+      save();
+      renderHomeWhy();
+    }
+  });
+  rtdb.ref('homeWhyHidden').on('value', snapshot => {
+    const val = snapshot.val();
+    if (val !== null && val !== undefined) {
+      store.homeWhyHidden = !!val;
+      save();
+      renderHomeWhy();
+    }
+  });
 }
-// Operator sees new posts when opening the tab, and every minute while the app is open.
-const _openOpTab = $('tabOp').onclick;
-$('tabOp').onclick = () => { _openOpTab(); syncFromDb(); };
-setInterval(() => { if (!document.hidden) syncFromDb(); }, 60000);
-syncFromDb();
+
+// Start listeners immediately
+initFirebaseListeners();
 </script>
 </body>
 </html>
